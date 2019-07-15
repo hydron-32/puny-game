@@ -1,0 +1,756 @@
+from random import *
+import pygame,math
+from os import path
+from sys import exit
+
+# 夏日大作战互动模拟器1.0
+# cd \Users\Administrator\Desktop\bh3\
+# pyinstaller -F -w --clean --icon=the_ico.ico SummerBattle_beta_1.0.py
+# Desktop\bh3\SummerBattle_beta_1.0.py
+pygame.init()
+WIDTH = 700
+HEIGHT = 500
+screen = pygame.display.set_mode((WIDTH,HEIGHT))
+pygame.display.set_caption("崩坏3夏日大作战模拟器 2019/7")
+clock = pygame.time.Clock()
+now = pygame.time.get_ticks()
+
+# 颜色
+bg_color = 255,255,177
+bt_color = 255,157,69
+blue = 0,100,255
+grey = 150,150,150
+brown = 189,123,0
+black = 0,0,0
+red = 255,0,0
+green = 0,255,0
+deepgreen = 0,180,0
+yellow = 255,255,0
+white = 255,255,255
+purple = 255,0,255
+
+names = ['芽衣','琪亚娜','布洛妮娅','姬子','德莉莎','符华',\
+			'卡莲','八重樱','丽塔','萝莎莉娅','莉莉娅','希儿']
+state = 'menu'
+queue = []
+test_result = ['','',0,0]
+log = []
+logging = False
+dvd = 10
+interval = 2000
+# [回合数，下次行动，下次行动时间]
+# 下次行动 0表示a攻击，1表示b攻击，2表示下一回合开始
+count = [1,0,0]
+winner_text = []
+float_text = []
+float_interval = 1500
+
+class Valkyrja():
+	def __init__(self,name):
+		self.hp = self.top_hp = 100
+		self.name = name
+		self.dodge = 0
+		self.dead = False
+		self.dead_time = 0
+		self.next_atk_time = 0
+		self.center = 0,0
+		# 详细对战模式
+		if 'battle' in state:
+			self.img = dic[name][0]
+			self.init_time = now
+
+		# 回合
+		self.count = 0
+		# 技能周期
+		self.period = 100
+		# 不能攻击
+		self.dizzy = False
+		# 失去技能
+		self.silence = False
+		# 沉默结束
+		self.silence_over = False
+		# 虚弱持续回合
+		self.weak_count = 0
+		# 燃烧状态
+		self.burned = False
+		# 燃烧持续回合
+		self.burn_count = 0
+
+		if name == '芽衣':
+			self.atk = 26
+			self.deff = 6
+			self.spd = 0
+		elif name == '德莉莎':
+			self.atk = 24
+			self.deff = 8
+			self.spd = -2
+			self.period = 2
+		elif name == '琪亚娜':
+			self.atk = 23
+			self.deff = 11
+			self.spd = -3
+			self.hp += 20
+			self.top_hp = self.hp
+			self.period = 3
+		elif name == '希儿':
+			self.atk = 23
+			self.deff = 10
+			self.spd = 5
+			self.period = 4
+		elif name == '丽塔':
+			self.atk = 26
+			self.deff = 8
+			self.spd = 0
+		elif name == '布洛妮娅':
+			self.atk = 26
+			self.deff = 8
+			self.spd = -5
+			self.dodge = 0.15
+			self.period = 3
+		elif name == '姬子':
+			self.atk = 24
+			self.deff = 10
+			self.spd = -5
+			self.double_atk = False # 技能生效
+		elif name == '卡莲':
+			self.atk = 26
+			self.deff = 6
+			self.spd = 5
+		elif name == '萝莎莉娅':
+			self.atk = 30
+			self.deff = 4
+			self.spd = 3
+			self.damage_change = 0
+			self.period = 3
+		elif name == '符华':
+			self.atk = 27
+			self.deff = 8
+			self.spd = 5
+			self.period = 3
+			self.ex_life = True
+		elif name == '八重樱':
+			self.atk = 28
+			self.deff = 7
+			self.spd = 3
+		elif name == '莉莉娅':
+			self.atk = 20
+			self.deff = 11
+			self.spd = 3
+
+		self.origin_atk = self.atk
+
+	def attack(self):
+		enemy = self.enemy
+		if self.dizzy: # 无法行动
+			self.dizzy = False
+			write_log('{}本回合无法行动'.format(self.name))
+			write_float_text('无法行动',red,self.center[0],self.center[1]-120)
+			if self.count % self.period == self.period-1:
+				self.count -= 1
+			return [0],0,'',self
+
+		if self.silence_over:
+			self.silence_over = False
+			self.silence = False
+
+		# 物理伤害
+		phy_dmg = self.atk
+		# 元素伤害
+		ele_dmg = 0
+		# 攻击效果
+		effect = ''
+
+		if self.name == '萝莎莉娅':
+			if self.damage_change > 0:
+				effect = 'increase'
+				write_float_text('伤害增高',red,self.center[0],self.center[1]-80)
+			elif self.damage_change < 0:
+				effect = 'decrease'
+				write_float_text('伤害降低',red,self.center[0],self.center[1]-80)
+			self.damage_change = 0
+
+		if self.name == '姬子':
+			if self.double_atk:
+				ele_dmg = 2*self.atk
+				self.double_atk = False
+				write_log('姬子打出蓄力斩')
+				write_float_text('蓄力斩',red,self.center[0],self.center[1]-120)
+
+		if not self.silence:
+			if self.name == '芽衣':
+				ele_dmg = 5
+				if random() < 0.3:
+					ele_dmg = 15
+					effect = 'silence'
+					write_log('{}被沉默，下一回合无法使用技能'.format(enemy.name))
+					write_float_text('必杀技',red,self.center[0],self.center[1]-120)
+			if self.name == '德莉莎':
+				if self.count % self.period == self.period-1:
+					write_log('德莉莎使用了必杀技')
+					write_float_text('必杀技',red,self.center[0],self.center[1]-120)
+					phy_dmg = 0
+					for i in range(4):
+						ele_dmg += randint(1,16)
+			if self.name == '琪亚娜':
+				if self.count % self.period == self.period-1:
+					phy_dmg = 8*[12]
+					write_log('琪亚娜使用了必杀技光翼展开！')
+					write_float_text('光翼展开',red,self.center[0],self.center[1]-120)
+			if self.name == '希儿':
+				if self.count % self.period == self.period-1:
+					if random() < 0.25:
+						phy_dmg = 100
+						text = '希儿发动必杀技命中了{}'.format(enemy.name)
+					else:
+						phy_dmg = 0
+						text = '希儿发动必杀技，但没有命中{}'.format(enemy.name)
+						write_float_text('未命中',red,self.enemy.center[0],self.enemy.center[1]-120)
+					write_log(text)
+					write_float_text('必杀技',red,self.center[0],self.center[1]-120)
+			if self.name == '丽塔':
+				if random() < 0.2:
+					effect = 'dizzy'
+					write_log('{}被冻结，下一回合无法行动'.format(enemy.name))
+					write_float_text('冻结',red,self.enemy.center[0],self.enemy.center[1]-120)
+			if self.name == '布洛妮娅':
+				if self.count % self.period == self.period-1:
+					phy_dmg = randint(1,100)
+					write_log('布洛妮娅使用必杀技，投出了{}枚金币'.format(phy_dmg))
+					write_float_text('必杀技',red,self.center[0],self.center[1]-120)
+			if self.name == '姬子':
+				if random() < 0.3 and not ele_dmg:
+					phy_dmg = 0
+					self.double_atk = True
+					write_log('姬子开始蓄力')
+					write_float_text('蓄力',red,self.center[0],self.center[1]-120)
+			if self.name == '卡莲':
+				if random() < 0.05:
+					effect = 'dead'
+				elif random() < 0.3:
+					effect = 'weak'
+			if self.name == '萝莎莉娅':
+				if self.count % self.period == self.period-1:
+					phy_dmg = [15]*10
+					self.dizzy = True
+					write_log('萝莎莉娅发动必杀技呼啦啦旋风！')
+					write_float_text('呼啦啦旋风！',red,self.center[0],self.center[1]-60)
+				i = random()
+				if i < 0.3:
+					self.damage_change = 1
+					write_log('萝莎莉娅的下次伤害变高了')
+					write_float_text('下次伤害变高',red,self.center[0],self.center[1]-120)
+				elif i > 0.7:
+					self.damage_change = -1
+					write_log('萝莎莉娅的下次伤害变低了')
+					write_float_text('下次伤害变低',red,self.center[0],self.center[1]-120)
+			if self.name == '符华':
+				if self.count % self.period == self.period-1:
+					phy_dmg = 0
+					ele_dmg = randint(10,30)
+					write_log('符华召唤了巨型赤鸢攻击')
+					write_float_text('赤鸢攻击',red,self.center[0],self.center[1]-120)
+			if self.name == '八重樱':
+				if random() < 0.2:
+					effect += 'burn'
+				if random() < 0.25:
+					effect += 'double'
+					write_float_text('暴击',red,self.center[0],self.center[1]-120)
+
+		else: # 沉默结束
+			self.silence_over = True
+
+		if self.weak_count:
+			self.weak_count -= 1
+
+		if type(phy_dmg) != list:
+			phy_dmg = [phy_dmg]
+
+		return phy_dmg,ele_dmg,effect,self
+
+	def phy_hurt(self,phy_dmg,ratio):
+		# 收到物理伤害，返回实际受伤
+		# 防御减伤
+		phy_dmg -= self.deff
+		# 比例增伤或减伤
+		phy_dmg *= ratio
+		if phy_dmg % 1 == 0.5:
+			phy_dmg += 0.5
+		phy_dmg = round(phy_dmg)
+		if phy_dmg < 0:
+			phy_dmg = 0
+		return phy_dmg
+
+	def ele_hurt(self,ele_dmg):
+		if self.name == '德莉莎':
+			ele_dmg *= 0.5
+			if ele_dmg % 1 == 0.5:
+				ele_dmg += 0.5
+			ele_dmg = round(ele_dmg)
+		elif self.name == '符华':
+			if not self.ex_life and ele_dmg:
+				ele_dmg = 0
+				write_log(('符华免疫了元素伤害'))
+				write_float_text('免疫',blue,self.center[0],self.center[1]-100)
+		self.hp -= ele_dmg
+		if ele_dmg:
+			write_log('{}受到{}点元素伤害，当前血量{}'.format(self.name,ele_dmg,self.hp))
+			write_float_text(str(-ele_dmg),blue,self.center[0],self.center[1]-100,now+500)
+
+	def hurt(self,dmg):
+		real_phy_dmg = 0
+		if random() > 1 - self.dodge:
+			write_log('{}闪避了攻击'.format(self.name))
+			write_float_text('闪避',red,self.center[0],self.center[1]-120)
+		
+		# 未被闪避
+		else:
+			phy_dmg,ele_dmg,effect,enemy = dmg
+			avoid_ele = False
+			ratio = 1
+			if 'double' in effect:
+				ratio = 2
+				write_log('八重樱使用了必杀技使伤害翻倍！')
+			elif 'increase' == effect:
+				ratio = 1.5
+				write_log('萝莎莉娅本回合伤害上升')
+			elif 'decrease' == effect:
+				ratio = 0.5
+				write_log('萝莎莉娅本回合伤害下降')	
+
+			if self.name == '莉莉娅' and random() < 0.15:
+				new_dmg = [sum(dmg[0])],dmg[1],'',self
+				write_log('莉莉娅反弹了对方的伤害！')
+				write_float_text('反击',red,self.center[0],self.center[1]-120)
+				enemy.hurt(new_dmg)
+				avoid_ele = True
+
+			else:
+				for i in phy_dmg: # 计算物理减伤
+					part_phy_dmg = self.phy_hurt(i,ratio)
+					real_phy_dmg += part_phy_dmg
+				if real_phy_dmg: # 实际受伤
+					self.hp -= real_phy_dmg
+					write_log('{}受到{:.0f}点物理伤害，当前血量{}'.format(self.name,real_phy_dmg,self.hp))
+					write_float_text(str(-real_phy_dmg),red,self.center[0],self.center[1]-80,now+500)
+
+			# 元素伤害
+			if not avoid_ele:
+				self.ele_hurt(ele_dmg)
+
+			# 攻击效果
+			if effect == 'silence':
+				self.silence = True
+				write_float_text('沉默',purple,self.center[0],self.center[1]-120)
+			elif effect == 'dizzy':
+				self.dizzy = True
+				write_float_text('冻结',blue,self.center[0],self.center[1]-120)
+			elif effect == 'dead':
+				self.dead = True
+				write_log('{}变成了废人，失败'.format(self.name))
+				write_float_text('致死',red,self.center[0],self.center[1]-120)
+			elif effect == 'weak':
+				self.weak_count = 2
+				write_log('{}进入虚弱状态，持续两回合'.format(self.name))
+				write_float_text('虚弱',grey,self.center[0],self.center[1]-120)
+			elif 'burn' in effect:
+				self.burned = True
+				self.burn_count = 3
+				write_log('八重樱的攻击点燃了{}'.format(self.name))
+				write_float_text('点燃',bt_color,self.center[0],self.center[1]-120)
+
+		self.update()
+		return real_phy_dmg
+
+	def update(self):
+		if self.hp <= 0 and not self.dead:
+			self.dead = True
+			self.dead_time = now
+			if self.name == '符华':
+				if self.ex_life:
+					self.dead = False
+					self.ex_life = False
+					self.hp = 1
+					write_log('符华触发被动，生命变为1，并免疫元素伤害')
+					write_float_text('重生',red,self.center[0],self.center[1]-120)
+				else:
+					write_log('{}失败了'.format(self.name))
+					write_float_text('倒下',red,self.center[0],self.center[1]-140)
+			else:
+				write_log('{}失败了'.format(self.name))
+				write_float_text('倒下',red,self.center[0],self.center[1]-140)
+		if self.name == '布洛妮娅':
+			self.dodge = 0 if self.silence else 0.15
+		if self.name == '姬子' and self.hp < 40:
+			self.atk = self.origin_atk = 36
+			self.deff = 15
+		if self.weak_count:
+			self.atk = self.origin_atk - 15
+		else:
+			self.atk = self.origin_atk
+			
+
+	def rita_heal(self,heal):
+		if self.name == '丽塔' and not self.silence:
+			if random() < 0.3 and heal:
+				if self.hp + heal > 100:
+					heal = 100 - self.hp
+				self.hp += heal
+				write_log('丽塔恢复了{}点血量，当前血量{}'.format(heal,self.hp))
+				write_float_text('+{}'.format(heal),deepgreen,self.center[0],self.center[1]-80,now+300)
+
+	def seele_heal(self):
+		if self.name == '希儿' and not self.silence and not self.dead:
+			heal = 7
+			if self.hp + heal > 100:
+				heal = 100 - self.hp
+			self.hp += heal
+			write_log('希儿恢复了{}点血量，当前血量{}'.format(heal,self.hp))
+			write_float_text('+{}'.format(heal),deepgreen,self.center[0],self.center[1]-80)
+
+	def burn_check(self):
+		if self.burned:
+			self.ele_hurt(5)
+			self.burn_count -= 1
+			if self.burn_count <= 0:
+				self.burned = False
+
+	def liliya_check(self):
+		if self.name == '莉莉娅' and self.count >= 6:
+			write_log('莉莉娅存活了7回合，获得胜利')
+			write_float_text('存活胜利',blue,self.center[0],self.center[1]-120)
+			self.enemy.dead = True
+def write(text,color,x,y,size):
+	a_font = 'simhei'
+	font_name = pygame.font.match_font(a_font)
+	font = pygame.font.Font(font_name,size)
+	text_surface = font.render(text,True,color)
+	text_rect = text_surface.get_rect()
+	text_rect.center = x,y
+	screen.blit(text_surface,text_rect)
+	return text_rect
+def monitor():
+	def in_button(pos,rect):
+		# 检测指针位置是否在按钮范围中
+		if type(rect) == tuple or type(rect) == list: # (x,y,x+w,y+h)
+			left,top,right,bottom = rect
+		else:
+			left,top,right,bottom = rect.left,rect.top,rect.right,rect.bottom
+		if left < pos[0] < right and top < pos[1] < bottom:
+			return True
+		return False
+	global state,logging,log_index
+	event_list = pygame.event.get() # 监测用户操作
+	for event in event_list:
+		if event.type == pygame.QUIT:
+			exit()
+		if event.type == pygame.MOUSEBUTTONDOWN:
+			if event.button == 1:
+				if state == 'menu':
+					i = 0
+					for name in dic:
+						center = WIDTH/2 + (i%6-2.5)*80, HEIGHT/2 + (i//6-0.5)*2*40
+						if (event.pos[0]-center[0])**2+(event.pos[1]-center[1])**2 < dic[name][3]**2\
+							and not dic[name][1]:
+							dic[name][1] = True
+							dic[name][2] = now
+							queue.insert(0,name)
+						i += 1
+					if in_button(event.pos,one_rect) and len(queue) == 2:
+						start_battle()
+					if in_button(event.pos,statistic_rect) and len(queue) == 2:
+						global test_result
+						test_result = test(5000,queue[0],queue[1])
+
+				elif 'battle' in state:
+					if in_button(event.pos,return_rect):
+						state = 'menu'
+					if in_button(event.pos,log_control_rect):
+						logging = not logging
+
+		if event.type == pygame.KEYDOWN:
+			if logging and len(log) > 16 and 'battle' in state:
+				if event.key == pygame.K_UP:
+					if len(log)-log_index-dvd*2 > 0:
+						log_index += 1
+				elif event.key == pygame.K_DOWN:
+					log_index = log_index-1 if log_index > 0 else log_index
+def update():
+	if len(queue) > 2:
+		name = queue.pop()
+		dic[name][1] = False
+	if state == 'battle':
+		if a.spd >= b.spd:
+			valk_1,valk_2 = a,b
+		else:
+			valk_1,valk_2 = b,a
+		dead_check(valk_1,valk_2)
+		if now >= count[2]:
+			if count[1] == 0:
+				# valk_1攻击
+				dmg = valk_1.attack()
+				real_phy_dmg = valk_2.hurt(dmg)
+				valk_1.rita_heal(real_phy_dmg)
+				count[1] += 1
+				count[2] = now + interval
+				if sum(dmg[0])+dmg[1]:
+					if valk_1 == a:
+						attack_time['left'] = [True,now]
+					else:
+						attack_time['right'] = [True,now]
+				# write_log('{}进攻了{}'.format(valk_1.name,valk_2.name))
+
+			elif count[1] == 1:
+				# valk_2攻击
+				dmg = valk_2.attack()
+				real_phy_dmg = valk_1.hurt(dmg)
+				valk_2.rita_heal(real_phy_dmg)
+				count[1] += 1
+				count[2] = now + interval
+				if sum(dmg[0])+dmg[1]:
+					if valk_2 == a:
+						attack_time['left'] = [True,now]
+					else:
+						attack_time['right'] = [True,now]
+				# write_log('{}进攻了{}'.format(valk_2.name,valk_1.name))
+
+			elif count[1] == 2:
+				# 新的回合
+				for valk in (valk_1,valk_2):
+					valk.seele_heal()
+					valk.burn_check()
+					valk.update()
+					valk.liliya_check()
+					valk.count += 1
+				count[0] += 1
+				count[1] = 0
+				count[2] = now + interval
+				write_log('---回合{}---'.format(count[0]))
+def dead_check(a,b):
+	global state
+	for i in (a,b):
+		if i.dead and state == 'battle':
+			state = 'battle_over'
+			winner_text.append('{} 获胜！'.format(i.enemy.name))
+def draw():
+	screen.blit(bg,(0,0))
+	if state == 'menu':
+		i = 0
+		for name in dic:
+			img = dic[name][0]
+			if dic[name][1]:
+				ratio = (now - dic[name][2]) / 300
+				if 0 <= ratio <= 1:
+					size = round(60+ratio*20)
+					dic[name][3] = size
+					img = pygame.transform.smoothscale(img,(size,size))
+					img = pygame.transform.rotate(img,15*math.sin((now-dic[name][2])/3000*2*math.pi))
+				else:
+					dic[name][3] = 40
+					img = pygame.transform.smoothscale(img,(60+20,60+20))
+					img = pygame.transform.rotate(img,15*math.sin((now-dic[name][2])/3000*2*math.pi))
+			else:
+				dic[name][3] = 30
+				img = pygame.transform.smoothscale(img,(60,60))
+			rect = img.get_rect()
+			rect.center = WIDTH/2 + (i%6-2.5)*80, HEIGHT/2 + (i//6-0.5)*2*40
+			screen.blit(img,rect)
+			i += 1
+		global one_rect,statistic_rect
+		color = grey if len(queue) < 2 else brown
+		one_rect = write('开始对战',color,WIDTH/2-100,HEIGHT*0.76,24)
+		statistic_rect = write('计算胜率',color,WIDTH/2+100,HEIGHT*0.76,24)
+		if test_result[0] != '':
+			write('{0}和{1}进行5000次对战:'.format(test_result[0],test_result[1]),brown,WIDTH/2,HEIGHT*0.85,15)
+			write('{0}的胜率为{2:.3f}, {1}的胜率为{3:.3f}'.format(test_result[0],test_result[1],\
+				test_result[2],test_result[3]),brown,WIDTH/2,HEIGHT*0.9,15)
+			pygame.draw.rect(screen,red,(10,HEIGHT*0.95,(WIDTH-20)*test_result[2],10))
+			pygame.draw.rect(screen,green,(WIDTH-10,HEIGHT*0.95,-(WIDTH-20)*test_result[3],10))
+
+		write('夏日大作战模拟器',grey,WIDTH/2+2,HEIGHT*0.12+2,50)
+		write('夏日大作战模拟器',yellow,WIDTH/2,HEIGHT*0.12,50)
+		write('选择两位女武神进行对战',brown,WIDTH/2,HEIGHT*0.25,16)
+		for name in queue:
+			i = queue.index(name)
+			size = 20 + round(5*math.sin(now/3000*2*math.pi))
+			write(name,brown,WIDTH/2+300*(i-0.5),HEIGHT*0.25,size)
+
+	elif 'battle' in state:
+		for i in float_text:
+			text,color,x,y,time = i
+			if 0 <= now - time <= float_interval:
+				write(text,color,x,y,25)
+				i[3] -= 1
+			elif now - time > float_interval:
+				float_text.remove(i)
+		if winner_text:
+			write(winner_text[0],red,WIDTH/2,HEIGHT*0.12,30)
+		write('ROUND {}'.format(count[0]),brown,WIDTH/2,HEIGHT*0.2,24)
+		global return_rect,log_control_rect
+		return_rect = write('返回',brown,40,HEIGHT*0.95,20)
+		text = '查看日志' if not logging else '关闭日志'
+		log_control_rect = write(text,brown,WIDTH/2,HEIGHT*0.95,20)
+
+		i = -1
+		for valk in (a,b):
+			img = pygame.transform.scale(valk.img,(100,100))
+			if not valk.dead:
+				img = pygame.transform.rotate(img,15*math.sin((now-valk.init_time)/3000*2*math.pi))
+				color = red if valk.hp < 50 else green
+				pygame.draw.rect(screen,color,(WIDTH*(0.5+i*0.47),HEIGHT*0.03,valk.hp*-i*2,15))
+			rect = img.get_rect()
+			rect.centery = valk.center[1]
+			if i<0 and attack_time['left'][0]:
+				ratio = (now - attack_time['left'][1]) / 300
+				if ratio <= 1:
+					rect.centerx = valk.center[0] + WIDTH*0.4 * ratio
+				elif 1 < ratio <= 2:
+					rect.centerx = valk.center[0] + WIDTH*0.4 * (2-ratio)
+				else:
+					rect.centerx = valk.center[0]
+					attack_time['left'][0] = False
+			elif i>0 and attack_time['right'][0]:
+				ratio = (now - attack_time['right'][1]) / 300
+				if ratio <= 1:
+					rect.centerx =  valk.center[0] - WIDTH*0.4 * ratio
+				elif 1 < ratio <= 2:
+					rect.centerx =  valk.center[0] - WIDTH*0.4 * (2-ratio)
+				else:
+					rect.centerx = valk.center[0]
+					attack_time['right'][0] = False
+			else:
+				rect.centerx = valk.center[0]
+			screen.blit(img,rect)
+			pygame.draw.rect(screen,white,(WIDTH*(0.5+i*0.47),HEIGHT*0.03,valk.top_hp*-i*2,15),2)
+			write('{}/{}'.format(valk.hp,valk.top_hp),brown,WIDTH*(0.5+i*0.4),HEIGHT*0.1,20)
+			write(valk.name,brown,WIDTH*(0.5+i*0.25),HEIGHT*0.1,20)
+			i += 2
+
+		if logging:
+			pygame.draw.rect(screen,white,(WIDTH*0.1,HEIGHT*0.5,WIDTH*0.8,HEIGHT*0.40))
+			pygame.draw.rect(screen,grey,(WIDTH*0.1,HEIGHT*0.5,WIDTH*0.8,HEIGHT*0.40),4)
+			if len(log) < dvd*2:
+				log_list = list(range(len(log))) 
+			else:
+				log_list = list(range(len(log)-log_index-dvd*2,len(log)-log_index))
+			j = 0
+			for i in log_list:
+				write(log[i],grey,WIDTH*(0.3+(j//dvd)*0.4),HEIGHT*(0.53+(j%dvd)*0.038),13)
+				j += 1
+			
+
+	write('程序作者：月独酱w',bt_color,WIDTH-50,HEIGHT-7,10)
+	pygame.display.update()
+def write_float_text(text,color,x,y,time=0):
+	if 'battle' in state:
+		if time == 0:
+			time = now
+		float_text.append([text,color,x,y,time])
+def start_battle():
+	global state,a,b,logging,log_index,attack_time
+	state = 'battle'
+	a = Valkyrja(queue[0])
+	b = Valkyrja(queue[1])
+	a.center = [WIDTH*0.25,HEIGHT/2]
+	b.center = [WIDTH*0.75,HEIGHT/2]
+	a.enemy,b.enemy = b,a
+	valk_1 = a if a.spd >= b.spd else b
+	logging = False
+	log_index = 0
+	attack_time = {'left':[False,0],'right':[False,0]}
+	count[0] = 1
+	count[1] = 0
+	count[2] = now + interval
+	log.clear()
+	winner_text.clear()
+	write_log('{}对阵{},由{}先手'.format(a.name,b.name,valk_1.name))
+	write_log('---回合1---')
+def battle(name_1,name_2):
+	a = Valkyrja(name_1)
+	b = Valkyrja(name_2)
+	a.enemy,b.enemy = b,a
+	name = a.name if a.spd >= b.spd else b.name	
+	while not a.dead and not b.dead:
+		one_round(a,b)
+		if a.dead:
+			return 0
+		elif b.dead:
+			return 1 # a胜利返回1
+def one_round(a,b):
+	if a.spd < b.spd:
+		b,a = a,b
+
+	for i in (a,b):
+		i.seele_heal()
+		i.burn_check()
+		i.update()
+		i.liliya_check()
+		
+	if not a.dead and not b.dead:
+		dmg = a.attack()
+		real_phy_dmg = b.hurt(dmg)
+		a.rita_heal(real_phy_dmg)
+
+	if not a.dead and not b.dead:
+		dmg = b.attack()
+		real_phy_dmg = a.hurt(dmg)
+		b.rita_heal(real_phy_dmg)
+
+	a.count += 1
+	b.count += 1
+
+def test(n,a,b):
+	# 测试n次，得出a的胜率
+	win = 0
+	for i in range(n):
+		win += battle(a,b)
+	return [a,b,win/n,1-win/n]
+def knockout(n,a,b,c,d):
+	winners = []
+	for i in range(n):
+		win_1 = a if battle(a,b) else b
+		# win_2_1 = c if battle(c,d) else d
+		# win_2_2 = e if battle(e,f) else f
+		# win_2 = win_2_1 if battle(win_2_1,win_2_2) else win_2_2
+		winner = win_1 if battle(win_1,win_2) else win_2
+		winners.append(winner)
+	print('4人共进行淘汰赛{}次'.format(n))
+	for name in (a,b,c,d):
+		print('{:10}获胜{}次'.format(name,winners.count(name)))
+def write_log(text=''):
+	if state == 'battle':
+		log.append(text)
+def load_img(name): # 载入图像
+	# img_dir = path.join(path.dirname(__file__),'img')
+	_dir = path.join(path.dirname(__file__),name+'.png')
+	_img = pygame.image.load(_dir).convert_alpha()
+	return _img
+def chop_img(name,numx,numy,picx,picy): # 裁切指定图片并封装进列表
+	img_list = []
+	origin_img = load_img(name)
+	for y in range(numy):
+		for x in range(numx):
+			img = pygame.transform.chop(origin_img,((x+1)*picx,(y+1)*picy,picx*numx,picy*numy))
+			img = pygame.transform.chop(img,(0,0,x*picx,y*picy))
+			img_list.append(img)
+	return img_list
+
+imgs = chop_img('Valkyrjas',6,2,144,144)
+bg = pygame.transform.smoothscale(load_img('beach'),(WIDTH,HEIGHT))
+try:
+	pygame.display.set_icon(load_img('theresa'))
+except:
+	pass
+dic = {}
+for i in range(len(names)):
+	dic[names[i]] = [imgs[i],False,0,30]
+
+# knockout(10000,'布洛妮娅','符华','八重樱','卡莲')
+
+while True:
+	clock.tick(40)
+	now = pygame.time.get_ticks()
+	monitor()
+	update()
+	draw()
+
+# Desktop\bh3\SummerBattle_beta_1.0.py
